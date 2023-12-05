@@ -581,19 +581,17 @@ X = train.drop('price', axis=1).values
 import numpy as np
 
 # Count the frequency of each class
-class_counts = np.bincount(y)
+class_counts = np.bincount(y.astype(int))
 
 # Calculate class weights
 class_weights = 1. / class_counts
 
 # Normalize the weights so that they sum to 1
 class_weights = class_weights / np.sum(class_weights)
-
+# print(f"class weights = {class_weights}")
 # Create a dictionary mapping class labels to weights
-weight_dict = {i: weight for i, weight in enumerate(class_weights)}
-
-print(f"weight_dict = {weight_dict}")
-sample_weights = np.array([weight_dict[class_label] for class_label in y_train])
+weight_dict_non = {i: weight for i, weight in enumerate(class_weights)}
+print(weight_dict_non)
 
 true_test = test.values
 print(f"true test shape = {test.shape}")
@@ -611,10 +609,26 @@ y_filtered = train_filtered['price'].values
 # Drop the 'price' column to create the features DataFrame and then get its values
 X_filtered = train_filtered.drop('price', axis=1).values
 
+## decide the weight assign to different class
+import numpy as np
+
+# Count the frequency of each class
+class_counts = np.bincount(y_filtered.astype(int))
+
+# Calculate class weights
+class_weights = 1. / class_counts
+
+# Normalize the weights so that they sum to 1
+class_weights = class_weights / np.sum(class_weights)
+# print(f"class weights = {class_weights}")
+# Create a dictionary mapping class labels to weights
+weight_dict_filtered = {i: weight for i, weight in enumerate(class_weights)}
+print(weight_dict_filtered)
+
 # Perform PCA on filteed
 from sklearn.decomposition import PCA
 
-pca = PCA(n_components=40)
+pca = PCA(n_components=100)
 pca.fit(X_filtered)
 X_filtered = pca.transform(X_filtered)
 
@@ -660,36 +674,7 @@ plt.show()
 
 """### Models
 
-### Baseline
-"""
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report
-
-
-# Assuming 'X' and 'y' are your features and labels
-# X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-
-# Initialize the Logistic Regression model for multiclass
-model = LogisticRegression(multi_class='multinomial', solver='lbfgs', max_iter=1000)
-
-# Fit the model
-model.fit(X_train_filtered, y_train_filtered) # sensitive to NAN
-
-# Predict and evaluate
-y_pred = model.predict(X_test_filtered)
-print(classification_report(y_test_filtered, y_pred))
-from sklearn.metrics import accuracy_score
-
-# Assuming y_pred contains the predicted labels for the test set
-test_accuracy = accuracy_score(y_test_filtered, y_pred)
-
-# Print the test accuracy
-print(f"Test Accuracy: {test_accuracy * 100:.2f}%")
-
-"""### XGBoost
+### XGBoost
 Define my problem: multiclass classification
 """
 
@@ -707,11 +692,8 @@ from sklearn.metrics import accuracy_score, confusion_matrix
 xg_clf = xgb.XGBClassifier(
     n_estimators=1000,
     learning_rate=0.1,
-    max_depth=10,
-    colsample_bytree=0.6,
-    subsample=0.8,
+    max_depth=9,
     min_child_weight=3,
-    # other parameters
 )
 
 # Generate sample weights based on the class of each sample
@@ -721,12 +703,14 @@ sample_weights = np.array([weight_dict[class_label] for class_label in y_train])
 xg_clf.fit(X_train, y_train, sample_weight=sample_weights)
 
 # Predict on the test set
-y_pred = xg_clf.predict(X_test)
+
 
 # Compute the confusion matrix
-cm = confusion_matrix(y_test, y_pred)
+# cm = confusion_matrix(y_test, y_pred)
 
-print(f"confusion matrix is = {cm}")
+# print(f"confusion matrix is = {cm}")
+
+y_pred = xg_clf.predict(X_test)
 
 from sklearn.metrics import classification_report
 print(classification_report(y_test, y_pred))
@@ -737,7 +721,7 @@ print(classification_report(y_test, y_pred))
 from sklearn.metrics import accuracy_score
 
 # Assuming y_pred contains the predicted labels for the test set
-test_accuracy = accuracy_score(y_test, y_pred)
+test_accuracy = accuracy_score(y_test_filtered, y_pred)
 
 # Print the test accuracy
 print(f"Test Accuracy: {test_accuracy * 100:.2f}%")
@@ -760,16 +744,16 @@ xg_clf = xgb.XGBClassifier(
 )
 
 # Generate sample weights based on the class of each sample
-sample_weights = np.array([weight_dict[class_label] for class_label in y_train])
+sample_weights = np.array([weight_dict[class_label] for class_label in y_train_filtered])
 
 # Fit the classifier to the training set with sample weights
-xg_clf.fit(X_train, y_train, sample_weight=sample_weights)
+xg_clf.fit(X_train_filtered, y_train_filtered, sample_weight=sample_weights)
 
 # Predict on the test set
-y_pred = xg_clf.predict(X_test)
+y_pred = xg_clf.predict(X_test_filtered)
 
 # Compute the confusion matrix
-cm = confusion_matrix(y_test, y_pred)
+cm = confusion_matrix(y_test_filtered, y_pred)
 
 print(f"confusion matrix is = {cm}")
 
@@ -1018,7 +1002,7 @@ from sklearn.metrics import balanced_accuracy_score, classification_report
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(249, 512)
+        self.fc1 = nn.Linear(100, 512)
         # self.fc2 = nn.Linear(1024, 512)
         self.fc3 = nn.Linear(512, 256)
         self.fc4 = nn.Linear(256, 128)
@@ -1031,6 +1015,8 @@ class Net(nn.Module):
         x = F.relu(self.fc4(x))
         x = self.fc5(x)  # No softmax needed for CrossEntropyLoss
         return x
+    def predict_proba(self, x):
+      return F.softmax(self.forward(x), dim=1)
 
 # Initialize the network
 net = Net()
@@ -1052,7 +1038,7 @@ for epoch in range(epochs):
     total_loss = 0
     for data, label in train_loader:
         # Flatten data and transfer to CUDA if necessary
-        data = data.view(-1, 249)  # Reshape data
+        data = data.view(-1, 100)  # Reshape data
         label = label.long()
         # if using CUDA (uncomment if you're using GPU)
         data, label = data.to("cuda"), label.to("cuda")
@@ -1076,7 +1062,7 @@ for epoch in range(epochs):
         all_true_labels = []
 
         for data, label in valid_loader:
-            data = data.view(-1, 249)  # Reshape data
+            data = data.view(-1, 100)  # Reshape data
             data, label = data.to("cuda"), label.to("cuda")
             label = label.long()
             outputs = net(data)
@@ -1104,4 +1090,111 @@ for epoch in range(epochs):
 time_elapsed = time.time() - start_time
 print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
 
+import matplotlib.pyplot as plt
+
+# Data
+x = [100, 150, 200]
+y = [0.4732, 0.4920, 0.4986]
+
+# Creating the plot
+plt.plot(x, y, marker='o')  # 'o' denotes circular markers for each data point
+
+# Adding title and labels
+plt.title('Neural Network Hyperparameter Searching')
+plt.xlabel('# components')
+plt.ylabel('Balance Accuracy')
+
+# Display the plot
+plt.show()
+
 print(classification_report(all_true_labels, all_predictions))
+
+"""### XGBoost and MLP Ensemble Learning
+
+Combine the result from XGBoost and MLP
+
+MLP: Return Probabilities for Each Class
+
+### Ensemble on test data.
+"""
+
+## Further Split on my test data
+X_train_filtered_sub, X_test_filtered_sub, y_train_filtered_sub, y_test_filtered_sub = train_test_split(X_test_filtered, y_test_filtered, test_size=0.2, random_state=42)
+print(f"X_train_filtered_sub = {X_train_filtered_sub.shape}")
+
+# XGBoost Result
+# ## Further Split on my test data
+# X_train_filtered_sub, X_test_filtered_sub, y_train_filtered_sub, y_test_filtered_sub = train_test_split(X_test_filtered, y_test_filtered, test_size=0.2, random_state=42)
+# print(f"X_train_filtered_sub = {X_train_filtered_sub.shape}")
+# test_pred_xgb = xg_clf.predict_proba(X_train_filtered_sub)
+# X_train_filtered_sub = torch.tensor(X_train_filtered_sub).float().to('cuda')
+# test_pred_nn = net.predict_proba(X_train_filtered_sub).detach().cpu().numpy()
+# meta_features = np.column_stack((test_pred_xgb, test_pred_nn))
+
+# test_pred_xgb_sub = xg_clf.predict_proba(X_test_filtered_sub.cpu().numpy())
+# X_test_filtered_sub = torch.tensor(X_test_filtered_sub).float().to('cuda')
+# test_pred_nn_sub = net.predict_proba(X_test_filtered_sub).detach().cpu().numpy()
+# meta_features_test = np.column_stack((test_pred_xgb_sub, test_pred_nn_sub))
+
+test_pred_xgb = xg_clf.predict_proba(X_train_filtered)
+X_train_filtered = torch.tensor(X_train_filtered).float().to('cuda')
+test_pred_nn = net.predict_proba(X_train_filtered)
+meta_features = np.column_stack((test_pred_xgb, test_pred_nn.detach().cpu().numpy()))
+#
+
+# Train a meta-classifier on the predictions
+from sklearn.linear_model import LogisticRegression
+
+meta_classifier = LogisticRegression()
+meta_classifier.fit(meta_features, y_train_filtered)
+
+
+
+y_pred = meta_classifier.predict(meta_features_test)
+
+from sklearn.metrics import balanced_accuracy_score
+balanced_accuracy = balanced_accuracy_score(y_test_filtered_sub, y_pred)
+print(f"balanced accuracy = {balanced_accuracy}")
+
+# x = [0.5381082255832381, 0.5433168463861818]
+import matplotlib.pyplot as plt
+
+# Data
+y = [0.5381082255832381, 0.5433168463861818]
+labels = ['Model A', 'Model B']
+
+# Creating the histogram
+plt.bar(labels, y)
+
+# Adding titles and labels
+plt.xlabel('Models')
+plt.ylabel('Balanced Accuracy')
+plt.title('Balanced Accuracy of Models A and B')
+
+# Show the plot
+plt.show()
+
+# Predictions on test set
+true_test_tensor = torch.tensor(true_pca).float().to('cuda')
+test_pred_xgb = xg_clf.predict_proba(true_test_tensor.detach().cpu().numpy())
+test_pred_nn = net.predict_proba(true_test_tensor)  # Convert true_test to tensor if necessary
+
+# Convert to numpy and stack
+test_pred_xgb_np = test_pred_xgb
+test_pred_nn_np = test_pred_nn.detach().cpu().numpy()  # Assuming test_pred_nn is a PyTorch tensor
+test_meta_features = np.column_stack([test_pred_xgb_np, test_pred_nn_np])
+
+# Final predictions
+final_predictions = meta_classifier.predict(test_meta_features)
+
+predictions_df = pd.DataFrame(final_predictions, columns=['price'])
+
+# Create a new column for row ID, starting from 0
+predictions_df['id'] = range(0, len(predictions_df))
+
+# Reorder the columns to have 'ID' first and 'price' second
+predictions_df = predictions_df[['id', 'price']]
+print(f"submission = {predictions_df.shape}")
+# Save to CSV with the new row ID as the first column
+predictions_df.to_csv('/content/drive/My Drive/CS671FINAL/submission.csv', index=False)
+
